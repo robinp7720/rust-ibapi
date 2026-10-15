@@ -5,6 +5,7 @@ use crate::stubs::MessageBusStub;
 use crate::subscriptions::common::RoutedItem;
 use crate::subscriptions::SubscriptionItemStreamExt;
 use crate::subscriptions::{Drained, SubscriptionItem};
+use crate::transport::r#async::{AsyncIo, AsyncReconnect};
 use futures::StreamExt;
 use std::time::Duration;
 use tokio::sync::broadcast;
@@ -469,6 +470,128 @@ async fn subscription_cancel() {
     // Cancel again is a no-op.
     f.subscription.cancel().await;
     assert_eq!(f.bus.request_messages().len(), 1);
+}
+
+#[tokio::test]
+async fn checked_cancel_sends_once_and_stops_every_clone() {
+    let f = subscription_with::<CancellableItem>(Some(123), None, DecoderContext::default());
+    let mut clone = f.subscription.clone();
+    f.subscription.cancel_checked().await.unwrap();
+    clone.cancel_checked().await.unwrap();
+    assert!(matches!(clone.next().await, Some(Err(Error::Cancelled))));
+    assert!(clone.next().await.is_none());
+    drop(f.subscription);
+    drop(clone);
+    tokio::task::yield_now().await;
+    assert_eq!(f.bus.request_messages(), vec![cancel_frame()]);
+}
+
+/// Exercise the real connection and bus while making the socket refuse writes.
+#[derive(Clone, Debug, Default)]
+struct CancelWriteStream {
+    inner: crate::transport::r#async::MemoryStream,
+    fail_writes: Arc<AtomicBool>,
+    attempts: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+#[async_trait::async_trait]
+impl AsyncIo for CancelWriteStream {
+    async fn read_message(&self) -> Result<Vec<u8>, Error> {
+        self.inner.read_message().await
+    }
+
+    async fn write_all(&self, bytes: &[u8]) -> Result<(), Error> {
+        self.attempts.fetch_add(1, Ordering::Relaxed);
+        if self.fail_writes.load(Ordering::Relaxed) {
+            return Err(Error::Io(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "cancel write failed")));
+        }
+        self.inner.write_all(bytes).await
+    }
+
+    async fn close(&self) {
+        self.inner.close().await;
+    }
+}
+
+#[async_trait::async_trait]
+impl AsyncReconnect for CancelWriteStream {
+    async fn reconnect(&self) -> Result<(), Error> {
+        self.inner.reconnect().await
+    }
+
+    async fn sleep(&self, duration: Duration, shutdown: &crate::transport::r#async::ShutdownSignal) {
+        self.inner.sleep(duration, shutdown).await;
+    }
+}
+
+impl crate::transport::r#async::AsyncStream for CancelWriteStream {}
+
+#[tokio::test]
+async fn checked_cancel_returns_write_failure_without_retrying() {
+    use crate::connection::r#async::AsyncConnection;
+    use crate::transport::r#async::AsyncTcpMessageBus;
+
+    let socket = CancelWriteStream::default();
+    let bus = Arc::new(AsyncTcpMessageBus::new(AsyncConnection::stubbed(socket.clone(), 28)));
+    let (_tx, rx) = broadcast::channel(8);
+    let subscription =
+        Subscription::<CancellableItem>::new_from_internal(AsyncInternalSubscription::new(rx), bus, Some(123), None, DecoderContext::default());
+    socket.fail_writes.store(true, Ordering::Relaxed);
+    assert!(matches!(subscription.cancel_checked().await, Err(Error::Io(_))));
+    socket.fail_writes.store(false, Ordering::Relaxed);
+    subscription.cancel_checked().await.unwrap();
+    drop(subscription);
+    tokio::task::yield_now().await;
+    assert!(socket.inner.captured().is_empty());
+    assert_eq!(socket.attempts.load(Ordering::Relaxed), 1);
+}
+
+#[tokio::test]
+async fn checked_cancel_returns_shared_account_write_failure() {
+    use crate::connection::r#async::AsyncConnection;
+    use crate::transport::r#async::AsyncTcpMessageBus;
+
+    let socket = CancelWriteStream::default();
+    let bus = Arc::new(AsyncTcpMessageBus::new(AsyncConnection::stubbed(socket.clone(), 28)));
+    let client = crate::client::r#async::Client::stubbed(bus, crate::server_versions::PROTOBUF_REST_MESSAGES_3);
+    let subscription = client.account_updates("DU_TEST").await.unwrap();
+    let subscribed = socket.inner.captured();
+
+    socket.fail_writes.store(true, Ordering::Relaxed);
+    assert!(matches!(subscription.cancel_checked().await, Err(Error::Io(_))));
+    socket.fail_writes.store(false, Ordering::Relaxed);
+    subscription.cancel_checked().await.unwrap();
+    drop(subscription);
+    tokio::task::yield_now().await;
+    assert_eq!(socket.inner.captured(), subscribed, "a failed cancel must not be retried");
+    assert_eq!(socket.attempts.load(Ordering::Relaxed), 2, "subscribe and one failed cancel");
+}
+
+#[derive(Debug)]
+struct CancelConstructionError;
+
+impl StreamDecoder<CancelConstructionError> for CancelConstructionError {
+    const RESPONSE_MESSAGE_IDS: &'static [IncomingMessages] = &[IncomingMessages::TickPrice];
+
+    fn decode(_context: &DecoderContext, _message: &ResponseMessage) -> Result<Self, Error> {
+        Ok(Self)
+    }
+
+    fn cancel_message(_version: i32, _id: Option<i32>, _context: Option<&DecoderContext>) -> Result<Vec<u8>, Error> {
+        Err(Error::Simple("cancel construction failed".into()))
+    }
+}
+
+#[tokio::test]
+async fn checked_cancel_returns_construction_failure() {
+    let f = subscription_with::<CancelConstructionError>(Some(123), None, DecoderContext::default());
+    assert!(matches!(f.subscription.cancel_checked().await, Err(Error::Simple(message)) if message == "cancel construction failed"));
+    f.subscription.cancel_checked().await.unwrap();
+    assert!(f.bus.request_messages().is_empty());
+
+    let no_cancel = subscription_with::<IntItem>(Some(123), None, DecoderContext::default());
+    no_cancel.subscription.cancel_checked().await.unwrap();
+    assert!(no_cancel.bus.request_messages().is_empty());
 }
 
 /// A reconnect ended the request at TWS along with the old session; the new

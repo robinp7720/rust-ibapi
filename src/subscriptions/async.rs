@@ -671,6 +671,27 @@ impl<T: StreamDecoder<T>> Subscription<T> {
     /// skipped, and the stream ends. A clone already waiting in `next()` is
     /// woken to yield it. Idempotent.
     pub async fn cancel(&self) {
+        if let Err(e) = self.cancel_checked().await {
+            log_cancel_error("subscription", &e);
+        }
+    }
+
+    /// Cancel the subscription and return construction or transport errors.
+    ///
+    /// Like [`Self::cancel`], this stops every clone and attempts cancellation
+    /// only once. A failed write is not retried by a later cancel or by drop.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # async fn example(client: &ibapi::Client) -> Result<(), ibapi::Error> {
+    /// let subscription = client.positions().await?;
+    /// subscription.cancel_checked().await?;
+    /// println!("Position subscription cancelled");
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn cancel_checked(&self) -> Result<(), Error> {
         // The route itself is released at drop, by liveness.
         let request = &self.request;
         request.stop.stop();
@@ -679,14 +700,12 @@ impl<T: StreamDecoder<T>> Subscription<T> {
         // and two tasks cancelling at once would otherwise both reach the
         // bus, releasing a shared stream's count twice.
         if request.cancelled.swap(true, Ordering::Relaxed) {
-            return;
+            return Ok(());
         }
 
         let id = request.id();
-        let message = request.pending_cancel(id);
-        if let Err(e) = send_cancel(&request.message_bus, id, request.shared, message).await {
-            log_cancel_error("subscription", &e);
-        }
+        let message = request.pending_cancel_checked(id)?;
+        send_cancel(&request.message_bus, id, request.shared, message).await
     }
 }
 
@@ -721,17 +740,28 @@ impl<T: StreamDecoder<T>> RequestState<T> {
     /// ended (a reconnect since it was sent): the cancel would name a request
     /// TWS already finished.
     fn pending_cancel(&self, id: Option<i32>) -> Option<Vec<u8>> {
+        self.pending_cancel_checked(id).unwrap_or_else(|e| {
+            log_cancel_error("subscription", &e);
+            None
+        })
+    }
+
+    fn pending_cancel_checked(&self, id: Option<i32>) -> Result<Option<Vec<u8>>, Error> {
         if self.message_bus.session_generation() != self.session_generation {
             debug!("request {:?} outlived its session: cancel skipped", self.request_id);
-            return None;
+            return Ok(None);
         }
         if self.request_id.is_some() && self.ended_natively.load(Ordering::Relaxed)
             || self.rejected.get().is_some_and(T::rejection_ends_request)
             || self.snapshot_ended.load(Ordering::Relaxed)
         {
-            return None;
+            return Ok(None);
         }
-        T::cancel_message(self.context.server_version, id, Some(&self.context)).ok()
+        match T::cancel_message(self.context.server_version, id, Some(&self.context)) {
+            Ok(message) => Ok(Some(message)),
+            Err(Error::NotImplemented) => Ok(None),
+            Err(error) => Err(error),
+        }
     }
 }
 

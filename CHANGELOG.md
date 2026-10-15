@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Autotrader fork: async `Subscription::cancel_checked()` preserves cancellation construction and transport errors for ordered cleanup. Cancellation is attempted once across clones, including after a failed write.
 - `ContractDetails::event_contract_topic`, `event_contract_description` and `event_contract_question`: a ForecastEx event contract's topic (`"US Fed Funds Target Rate"`), description (strike, expiry and right, `"FF Jan28'27 3.125"`) and full question. TWS sent them, and the client dropped them. Empty for other contracts. A struct literal or pattern naming every field must add them; see `docs/migration-6.0.md` §35 (#1251).
 - Historical and realtime `Bar`, `BidAsk`, `MidPoint`, `Trade`, `BidAskAttribute` and `TradeAttribute` implement `Default`: zero values, empty strings and a Unix-epoch timestamp, with `count` `-1` on a historical `Bar` (what TWS sends for non-TRADES bars) and no `volume` or `wap` on a realtime `Bar` (#1232).
 - `ContractDetails::trading_sessions()` and `liquid_sessions()` parse `trading_hours` and `liquid_hours` into `TradingSession`s: `Open { start, end }` as `time::PrimitiveDateTime`s, or `Closed(Date)`. The times stay wall clock in `time_zone_id`, as TWS sends them, so finding a day's close no longer means slicing `"20261112:1700-20261113:1600"`. `TradingSession` also parses one entry with `FromStr`; an entry in another form is `Error::Parse`. It is `Serialize`/`Deserialize` and in the prelude (#1230).
