@@ -327,6 +327,11 @@ async fn account_updates() {
 
     assert!(request_message_count(&message_bus) >= 2, "Expected subscribe and cancel messages");
     assert_request(&message_bus, 0, &request_account_updates().account(TEST_ACCOUNT));
+    assert_request(
+        &message_bus,
+        1,
+        &crate::testdata::builders::accounts::cancel_account_updates().account(TEST_ACCOUNT),
+    );
 }
 
 #[tokio::test]

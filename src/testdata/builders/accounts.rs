@@ -666,7 +666,7 @@ impl RequestEncoder for AccountUpdatesRequestBuilder {
 
     fn to_proto(&self) -> Self::Proto {
         proto::AccountDataRequest {
-            subscribe: Some(self.subscribe),
+            subscribe: self.subscribe.then_some(true),
             acct_code: self.account.clone(),
         }
     }

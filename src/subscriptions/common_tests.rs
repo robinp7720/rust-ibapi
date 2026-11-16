@@ -47,6 +47,7 @@ fn decoder_context_clone() {
         server_version: 176,
         is_smart_depth: true,
         request_type: Some(crate::messages::OutgoingMessages::RequestMarketData),
+        account: None,
     };
 
     let cloned = context.clone();
@@ -78,11 +79,13 @@ fn decoder_context_equality() {
                 server_version: 176,
                 is_smart_depth: true,
                 request_type: Some(crate::messages::OutgoingMessages::RequestMarketData),
+                account: None,
             },
             context2: DecoderContext {
                 server_version: 176,
                 is_smart_depth: true,
                 request_type: Some(crate::messages::OutgoingMessages::RequestMarketData),
+                account: None,
             },
             expected: true,
         },
@@ -102,6 +105,7 @@ fn decoder_context_equality() {
             name: "different_request_type",
             context1: DecoderContext {
                 request_type: Some(crate::messages::OutgoingMessages::RequestMarketData),
+                account: None,
                 ..Default::default()
             },
             context2: DecoderContext {
@@ -135,6 +139,7 @@ fn decoder_context_debug_format() {
         server_version: 176,
         is_smart_depth: true,
         request_type: Some(crate::messages::OutgoingMessages::RequestMarketData),
+        account: None,
     };
 
     let debug_str = format!("{:?}", context);

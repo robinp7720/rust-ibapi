@@ -119,12 +119,12 @@ fn encode_request_account_updates_works() {
 
 #[test]
 fn encode_cancel_account_updates_works() {
-    let bytes = super::encode_cancel_account_updates().unwrap();
+    let bytes = super::encode_cancel_account_updates(None).unwrap();
     assert_proto_msg_id(&bytes, OutgoingMessages::RequestAccountData);
 
     use prost::Message;
     let req = crate::proto::AccountDataRequest::decode(&bytes[4..]).unwrap();
-    assert_eq!(req.subscribe, Some(false));
+    assert_eq!(req.subscribe, None);
     assert!(req.acct_code.is_none());
 }
 

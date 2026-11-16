@@ -228,6 +228,8 @@ pub struct DecoderContext {
     pub request_type: Option<OutgoingMessages>,
     /// Whether this is a smart depth subscription
     pub is_smart_depth: bool,
+    /// Account named by an account-updates subscription, retained for cancellation.
+    pub account: Option<crate::accounts::types::AccountId>,
 }
 
 impl DecoderContext {
@@ -237,6 +239,7 @@ impl DecoderContext {
             server_version,
             request_type: None,
             is_smart_depth: false,
+            account: None,
         }
     }
 

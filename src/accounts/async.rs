@@ -332,12 +332,14 @@ impl Client {
         let account = &account.into();
         let request = encoders::encode_request_account_updates(true, account)?;
         let subscription = self.message_bus.send_account_updates_request(account, request).await?;
+        let mut context = self.decoder_context();
+        context.account = Some(account.clone());
         Ok(Subscription::new_from_internal(
             subscription,
             self.message_bus.clone(),
             None,
             None,
-            self.decoder_context(),
+            context,
         ))
     }
 

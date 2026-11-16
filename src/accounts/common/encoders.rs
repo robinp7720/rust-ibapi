@@ -105,12 +105,13 @@ pub(in crate::accounts) fn encode_request_account_updates(subscribe: bool, accou
     ))
 }
 
-pub(in crate::accounts) fn encode_cancel_account_updates() -> Result<Vec<u8>, Error> {
+pub(in crate::accounts) fn encode_cancel_account_updates(account: Option<&AccountId>) -> Result<Vec<u8>, Error> {
     use crate::messages::encode_protobuf_message;
     use prost::Message;
     let request = crate::proto::AccountDataRequest {
-        subscribe: Some(false),
-        acct_code: None,
+        // Match IBKR's reference client: false is represented by an absent field.
+        subscribe: None,
+        acct_code: account.map(ToString::to_string),
     };
     Ok(encode_protobuf_message(
         OutgoingMessages::RequestAccountData as i32,

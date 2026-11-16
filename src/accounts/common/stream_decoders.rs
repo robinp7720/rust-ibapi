@@ -131,8 +131,8 @@ impl StreamDecoder<AccountUpdate> for AccountUpdate {
         matches!(self, AccountUpdate::End)
     }
 
-    fn cancel_message(_server_version: i32, _request_id: Option<i32>, _context: Option<&DecoderContext>) -> Result<Vec<u8>, Error> {
-        encoders::encode_cancel_account_updates()
+    fn cancel_message(_server_version: i32, _request_id: Option<i32>, context: Option<&DecoderContext>) -> Result<Vec<u8>, Error> {
+        encoders::encode_cancel_account_updates(context.and_then(|c| c.account.as_ref()))
     }
 }
 
